@@ -1,0 +1,6 @@
+{
+  "name": "NIAZ AI ASSISTANT",
+  "description": "Your Personal AI Assistant — Work Smarter, Automatically.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
