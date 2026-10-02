@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Psychology
@@ -226,6 +227,14 @@ fun AssistantTopAppBar(
                     onDismissRequest = { showMenu = false },
                     modifier = Modifier.background(SurfaceCardDark)
                 ) {
+                    DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = CyanNeon) },
+                        text = { Text("Google OAuth 2.0", color = Color.White) },
+                        onClick = {
+                            onNavigate(Screen.OAUTH_CONFIG)
+                            showMenu = false
+                        }
+                    )
                     DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.Security, contentDescription = null, tint = CyanNeon) },
                         text = { Text("Permission Center", color = Color.White) },

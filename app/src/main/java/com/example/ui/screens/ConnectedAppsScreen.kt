@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,11 +26,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -53,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ConnectedApp
 import com.example.data.model.ConnectionStatus
+import com.example.data.remote.BackendApiClient
+import com.example.data.remote.GoogleAuthStatus
 import com.example.ui.components.ExecutionLevelBadge
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.AmberWarning
@@ -74,22 +82,32 @@ import com.example.ui.theme.DeepNavyElevated
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.SurfaceCardBorder
 import com.example.ui.theme.SurfaceCardDark
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectedAppsScreen(
     connectedApps: List<ConnectedApp>,
+    googleStatus: GoogleAuthStatus?,
+    onConnectGoogle: () -> Unit,
+    onDisconnectGoogle: () -> Unit,
+    onReauthorizeGoogle: () -> Unit,
+    onOpenOAuthConfig: () -> Unit,
     onConnectApp: (id: String, account: String) -> Unit,
     onDisconnectApp: (id: String) -> Unit,
     onTogglePermission: (appId: String, permId: String, granted: Boolean) -> Unit,
-    onToggleAutoSend: (appId: String, enabled: Boolean) -> Unit
+    onToggleAutoSend: (appId: String, enabled: Boolean) -> Unit,
+    onCopyGoogleLink: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var selectedAppForPermissions by remember { mutableStateOf<ConnectedApp?>(null) }
     var selectedAppForConnect by remember { mutableStateOf<ConnectedApp?>(null) }
     var connectAccountInput by remember { mutableStateOf("") }
     var testingConnectionAppId by remember { mutableStateOf<String?>(null) }
+
+    val isGoogleConnected = googleStatus?.connected == true
 
     LazyColumn(
         modifier = Modifier
@@ -100,61 +118,209 @@ fun ConnectedAppsScreen(
     ) {
         item {
             Spacer(modifier = Modifier.height(4.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = SurfaceCardDark,
+
+            // Dedicated Google OAuth Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("google_oauth_hero_card"),
+                colors = CardDefaults.cardColors(containerColor = SurfaceCardDark),
                 shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.5.dp,
+                    color = if (isGoogleConnected) CyanNeon else AmberWarning
+                )
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Lock, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Connection Center & Enterprise Security",
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White
-                        )
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF0F1B3B))
+                                    .border(1.5.dp, CyanNeon, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("G", color = CyanNeon, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Google Account (Gmail, Calendar, Drive)",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Server-Side OAuth 2.0 Authorization Code",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+
+                        val (badgeBg, badgeColor, badgeText) = when {
+                            isGoogleConnected -> Triple(EmeraldSuccess.copy(alpha = 0.2f), EmeraldSuccess, "CONNECTED")
+                            googleStatus?.status?.contains("Auth", true) == true -> Triple(AmberWarning.copy(alpha = 0.2f), AmberWarning, "AUTH NEEDED")
+                            else -> Triple(Color(0xFF64748B).copy(alpha = 0.2f), Color(0xFF94A3B8), "NOT CONNECTED")
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(badgeBg)
+                                .border(1.dp, badgeColor, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(badgeText, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = badgeColor)
+                        }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     Text(
-                        text = "Every integration connects via official OAuth 2.0 or verified developer APIs. Credentials and tokens are stored in hardware-backed Android Keystore and never exposed in client code.",
+                        text = if (isGoogleConnected)
+                            "Authorized Account: ${googleStatus?.email ?: "pak82914@gmail.com"}\nGmail, Google Calendar, and Google Drive APIs are connected with automatic token refresh."
+                        else
+                            "Real Google OAuth 2.0 flow. Connecting redirects you to Google's official authorization page to grant Gmail, Calendar, and Drive permissions.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF94A3B8)
+                        color = Color(0xFFCBD5E1)
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (!isGoogleConnected) {
+                            Button(
+                                onClick = onConnectGoogle,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("connect_google_btn_main"),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color.Black)
+                            ) {
+                                Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Connect Google", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = onCopyGoogleLink,
+                                modifier = Modifier.height(44.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link", modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Copy Link", fontSize = 11.sp)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = onDisconnectGoogle,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralError)
+                            ) {
+                                Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Disconnect", fontSize = 11.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = onReauthorizeGoogle,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Reauthorize", fontSize = 11.sp)
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = onOpenOAuthConfig,
+                            modifier = Modifier.height(42.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        ) {
+                            Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("OAuth Info", fontSize = 11.sp)
+                        }
+                    }
                 }
             }
         }
 
         item {
             Text(
-                text = "Configured Services (${connectedApps.count { it.status == ConnectionStatus.CONNECTED }} Active)",
+                text = "Connected Services",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 color = Color(0xFF94A3B8)
             )
         }
 
         items(connectedApps) { app ->
+            val isGoogleService = app.id in listOf("gmail", "calendar", "drive")
+
             ConnectedAppCard(
                 app = app,
                 isTesting = testingConnectionAppId == app.id,
                 onConnectClick = {
-                    selectedAppForConnect = app
-                    connectAccountInput = if (app.name == "WhatsApp") "+92 300 1234567" else "niaz.ahmed@example.com"
+                    if (isGoogleService) {
+                        onConnectGoogle()
+                    } else {
+                        selectedAppForConnect = app
+                        connectAccountInput = if (app.name == "WhatsApp") "+92 300 1234567" else "niaz.ahmed@example.com"
+                    }
                 },
-                onDisconnectClick = { onDisconnectApp(app.id) },
+                onDisconnectClick = {
+                    if (isGoogleService) {
+                        onDisconnectGoogle()
+                    } else {
+                        onDisconnectApp(app.id)
+                    }
+                },
                 onManagePermissionsClick = { selectedAppForPermissions = app },
                 onTestConnectionClick = {
                     testingConnectionAppId = app.id
-                    // Simulate ping to external API
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        testingConnectionAppId = null
-                        if (app.status == ConnectionStatus.CONNECTED) {
-                            Toast.makeText(context, "API Verification OK: ${app.name} is fully responsive!", Toast.LENGTH_SHORT).show()
+                    scope.launch {
+                        if (isGoogleService) {
+                            val res = when (app.id) {
+                                "gmail" -> BackendApiClient.searchGmail("is:unread")
+                                "calendar" -> BackendApiClient.listCalendar()
+                                else -> BackendApiClient.listDrive(3)
+                            }
+                            testingConnectionAppId = null
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "API Verification OK: ${app.name} is responsive!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "${app.name} test failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                            }
                         } else {
-                            Toast.makeText(context, "${app.name} is not connected. Authenticate to establish connection.", Toast.LENGTH_SHORT).show()
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                testingConnectionAppId = null
+                                if (app.status == ConnectionStatus.CONNECTED) {
+                                    Toast.makeText(context, "API Verification OK: ${app.name} is fully responsive!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "${app.name} is not connected. Authenticate to establish connection.", Toast.LENGTH_SHORT).show()
+                                }
+                            }, 800)
                         }
-                    }, 1000)
+                    }
                 }
             )
         }
@@ -209,7 +375,7 @@ fun ConnectedAppsScreen(
         item { Spacer(modifier = Modifier.height(16.dp)) }
     }
 
-    // Connect / OAuth Dialog
+    // Connect / OAuth Dialog for non-Google apps
     if (selectedAppForConnect != null) {
         val app = selectedAppForConnect!!
         AlertDialog(
@@ -224,13 +390,13 @@ fun ConnectedAppsScreen(
             text = {
                 Column {
                     Text(
-                        text = "Authenticate with ${app.name} using official OAuth 2.0 flow.",
+                        text = "Authenticate with ${app.name} using official API connection.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF94A3B8)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Account Identifier / Verified Email:",
+                        text = "Account Identifier / Verified ID:",
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         color = Color.White
                     )
@@ -340,7 +506,6 @@ fun ConnectedAppsScreen(
                     }
                 }
 
-                // Auto-send rule toggle if applicable
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier
@@ -401,7 +566,6 @@ fun ConnectedAppCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // App Logo Badge
                     Box(
                         modifier = Modifier
                             .size(40.dp)

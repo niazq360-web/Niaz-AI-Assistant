@@ -29,6 +29,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import com.example.data.model.ConnectionStatus
+import com.example.data.remote.BackendApiClient
+import com.example.data.remote.GoogleAuthStatus
+import com.example.data.remote.OAuthConfig
+
 enum class Screen {
     DASHBOARD,
     CHAT,
@@ -37,7 +45,8 @@ enum class Screen {
     AUTOMATIONS,
     PERMISSIONS,
     MEMORY,
-    SETTINGS
+    SETTINGS,
+    OAUTH_CONFIG
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -112,7 +121,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val memoryItems: StateFlow<List<MemoryEntity>> = repository.getAllMemory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Google Server-Side OAuth 2.0 State
+    private val _googleStatus = MutableStateFlow<GoogleAuthStatus?>(null)
+    val googleStatus: StateFlow<GoogleAuthStatus?> = _googleStatus.asStateFlow()
+
+    private val _oauthConfig = MutableStateFlow<OAuthConfig?>(null)
+    val oauthConfig: StateFlow<OAuthConfig?> = _oauthConfig.asStateFlow()
+
+    private val _isOAuthLoading = MutableStateFlow(false)
+    val isOAuthLoading: StateFlow<Boolean> = _isOAuthLoading.asStateFlow()
+
     init {
+        syncGoogleOAuthStatus()
+
         speechHelper = SpeechHelper(
             context = application,
             onSpeechResult = { text ->
@@ -504,6 +525,150 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSecurityLogs() {
         viewModelScope.launch {
             repository.clearLogs()
+        }
+    }
+
+    // Google Server-Side OAuth 2.0 Actions
+    fun syncGoogleOAuthStatus() {
+        viewModelScope.launch {
+            _isOAuthLoading.value = true
+            try {
+                val statusRes = BackendApiClient.getGoogleStatus()
+                val status = statusRes.getOrNull()
+                _googleStatus.value = status
+
+                val configRes = BackendApiClient.getOAuthConfig()
+                _oauthConfig.value = configRes.getOrNull()
+
+                if (status != null) {
+                    val connStatus = when (status.status) {
+                        "Connected" -> ConnectionStatus.CONNECTED
+                        "Authorization Required" -> ConnectionStatus.REAUTH_REQUIRED
+                        "Error" -> ConnectionStatus.ERROR
+                        else -> ConnectionStatus.NOT_CONNECTED
+                    }
+                    appsManager.updateGoogleServices(connStatus, status.email)
+                }
+            } catch (e: Exception) {
+                _googleStatus.value = GoogleAuthStatus(
+                    connected = false,
+                    status = "Error",
+                    email = null,
+                    name = null,
+                    connectedAt = null,
+                    scopes = emptyList(),
+                    error = e.message
+                )
+            } finally {
+                _isOAuthLoading.value = false
+            }
+        }
+    }
+
+    fun connectGoogle(context: Context) {
+        viewModelScope.launch {
+            _isOAuthLoading.value = true
+            val res = BackendApiClient.getGoogleAuthUrl()
+            _isOAuthLoading.value = false
+
+            if (res.isSuccess) {
+                val url = res.getOrThrow()
+                try {
+                    android.widget.Toast.makeText(context, "Opening Google Sign-In...", android.widget.Toast.LENGTH_SHORT).show()
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    try {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Google OAuth URL", url))
+                        android.widget.Toast.makeText(
+                            context,
+                            "Google Sign-In link copied to clipboard! Paste in browser to authorize.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    } catch (ce: Exception) {
+                        _speechError.value = "Could not launch browser: ${e.message}"
+                    }
+                }
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Google OAuth is not configured on the server."
+                android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun copyGoogleAuthUrl(context: Context) {
+        viewModelScope.launch {
+            _isOAuthLoading.value = true
+            val res = BackendApiClient.getGoogleAuthUrl()
+            _isOAuthLoading.value = false
+            if (res.isSuccess) {
+                val url = res.getOrThrow()
+                try {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Google OAuth URL", url))
+                    android.widget.Toast.makeText(context, "Google Sign-In link copied to clipboard!", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (ce: Exception) {
+                    android.widget.Toast.makeText(context, "Failed to copy link: ${ce.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Google OAuth is not configured on the server."
+                android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun disconnectGoogle() {
+        viewModelScope.launch {
+            _isOAuthLoading.value = true
+            val res = BackendApiClient.disconnectGoogle()
+            _isOAuthLoading.value = false
+            if (res.isSuccess) {
+                syncGoogleOAuthStatus()
+                repository.logSecurityEvent(
+                    toolName = "Google OAuth",
+                    service = "Google",
+                    level = "LEVEL_2_CONFIRM",
+                    status = "DISCONNECTED",
+                    details = "Google account revoked and disconnected"
+                )
+            }
+        }
+    }
+
+    fun reauthorizeGoogle(context: Context) {
+        viewModelScope.launch {
+            _isOAuthLoading.value = true
+            val res = BackendApiClient.getGoogleAuthUrl()
+            _isOAuthLoading.value = false
+
+            if (res.isSuccess) {
+                val url = res.getOrThrow()
+                try {
+                    android.widget.Toast.makeText(context, "Opening Google Reauthorization...", android.widget.Toast.LENGTH_SHORT).show()
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    try {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Google OAuth URL", url))
+                        android.widget.Toast.makeText(
+                            context,
+                            "Google Sign-In link copied to clipboard! Paste in browser to authorize.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    } catch (ce: Exception) {
+                        _speechError.value = "Could not launch browser: ${e.message}"
+                    }
+                }
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Google OAuth is not configured on the server."
+                android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 

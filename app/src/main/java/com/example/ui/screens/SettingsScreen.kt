@@ -347,6 +347,12 @@ fun SettingsScreen(
             ) {
                 Column {
                     SettingsNavRow(
+                        icon = Icons.Default.Key,
+                        title = "Google OAuth 2.0 & Services",
+                        subtitle = "Redirect URI, API readiness, connect & revoke",
+                        onClick = { onNavigate(Screen.OAUTH_CONFIG) }
+                    )
+                    SettingsNavRow(
                         icon = Icons.Default.Security,
                         title = "Permission Center",
                         subtitle = "Manage OAuth scopes and audit trail",

@@ -1,0 +1,9 @@
+{
+  "name": "niaz-ai-assistant",
+  "version": "1.0.0",
+  "description": "NIAZ AI ASSISTANT Backend and OAuth 2.0 Server",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  }
+}

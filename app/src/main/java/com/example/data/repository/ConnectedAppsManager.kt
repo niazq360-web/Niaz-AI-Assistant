@@ -19,18 +19,18 @@ class ConnectedAppsManager {
             category = "Google Workspace",
             description = "Read, draft, and send emails, summarize inbox and filter notifications.",
             iconName = "gmail",
-            status = ConnectionStatus.CONNECTED,
-            accountName = "niaz.ahmed@workmail.com",
-            connectedDate = "Sep 28, 2026",
-            lastUsedDate = "10 mins ago",
+            status = ConnectionStatus.NOT_CONNECTED,
+            accountName = null,
+            connectedDate = null,
+            lastUsedDate = null,
             permissions = listOf(
-                PermissionScope("gmail.read", "Read emails", "Access inbox to view and summarize messages", true, ExecutionLevel.LEVEL_1_SAFE),
-                PermissionScope("gmail.draft", "Create drafts", "Prepare draft replies without sending", true, ExecutionLevel.LEVEL_1_SAFE),
-                PermissionScope("gmail.send", "Send emails", "Send authorized messages on your behalf", true, ExecutionLevel.LEVEL_2_CONFIRM)
+                PermissionScope("gmail.read", "Read emails", "Access inbox to view and summarize messages", false, ExecutionLevel.LEVEL_1_SAFE),
+                PermissionScope("gmail.draft", "Create drafts", "Prepare draft replies without sending", false, ExecutionLevel.LEVEL_1_SAFE),
+                PermissionScope("gmail.send", "Send emails", "Send authorized messages on your behalf", false, ExecutionLevel.LEVEL_2_CONFIRM)
             ),
             isAutoSendAllowed = false,
-            oauthClientId = "617494223617-niaz-gmail.apps.googleusercontent.com",
-            authNotes = "Official Google OAuth 2.0 protocol. Tokens stored securely in Android Keystore EncryptedSharedPreferences."
+            oauthClientId = "Configured Server-Side (GOOGLE_CLIENT_ID)",
+            authNotes = "Official Google OAuth 2.0 authorization code flow. Server-side token exchange."
         ),
         ConnectedApp(
             id = "calendar",
@@ -38,18 +38,18 @@ class ConnectedAppsManager {
             category = "Google Workspace",
             description = "Check availability, create meetings, update schedules, and set reminders.",
             iconName = "calendar",
-            status = ConnectionStatus.CONNECTED,
-            accountName = "niaz.ahmed@workmail.com",
-            connectedDate = "Sep 28, 2026",
-            lastUsedDate = "1 hour ago",
+            status = ConnectionStatus.NOT_CONNECTED,
+            accountName = null,
+            connectedDate = null,
+            lastUsedDate = null,
             permissions = listOf(
-                PermissionScope("cal.read", "Read calendar", "View upcoming events and agenda", true, ExecutionLevel.LEVEL_1_SAFE),
-                PermissionScope("cal.create", "Create events", "Schedule events and add attendees", true, ExecutionLevel.LEVEL_2_CONFIRM),
-                PermissionScope("cal.edit", "Edit & delete events", "Reschedule or remove calendar entries", true, ExecutionLevel.LEVEL_3_HIGH_RISK)
+                PermissionScope("cal.read", "Read calendar", "View upcoming events and agenda", false, ExecutionLevel.LEVEL_1_SAFE),
+                PermissionScope("cal.create", "Create events", "Schedule events and add attendees", false, ExecutionLevel.LEVEL_2_CONFIRM),
+                PermissionScope("cal.edit", "Edit & delete events", "Reschedule or remove calendar entries", false, ExecutionLevel.LEVEL_3_HIGH_RISK)
             ),
             isAutoSendAllowed = false,
-            oauthClientId = "617494223617-niaz-cal.apps.googleusercontent.com",
-            authNotes = "Official Google Calendar API. Scopes: https://www.googleapis.com/auth/calendar.events"
+            oauthClientId = "Configured Server-Side (GOOGLE_CLIENT_ID)",
+            authNotes = "Official Google Calendar API. Scopes: https://www.googleapis.com/auth/calendar"
         ),
         ConnectedApp(
             id = "drive",
@@ -57,16 +57,16 @@ class ConnectedAppsManager {
             category = "Google Workspace",
             description = "Search documents, browse folders, upload project files, and organize assets.",
             iconName = "drive",
-            status = ConnectionStatus.CONNECTED,
-            accountName = "niaz.ahmed@workmail.com",
-            connectedDate = "Sep 28, 2026",
-            lastUsedDate = "Yesterday",
+            status = ConnectionStatus.NOT_CONNECTED,
+            accountName = null,
+            connectedDate = null,
+            lastUsedDate = null,
             permissions = listOf(
-                PermissionScope("drive.read", "Read files", "Search and view documents and sheets", true, ExecutionLevel.LEVEL_1_SAFE),
-                PermissionScope("drive.upload", "Upload files", "Save generated summaries and uploads", true, ExecutionLevel.LEVEL_1_SAFE),
-                PermissionScope("drive.manage", "Manage files", "Rename, move, or trash items", true, ExecutionLevel.LEVEL_3_HIGH_RISK)
+                PermissionScope("drive.read", "Read files", "Search and view documents and sheets", false, ExecutionLevel.LEVEL_1_SAFE),
+                PermissionScope("drive.upload", "Upload files", "Save generated summaries and uploads", false, ExecutionLevel.LEVEL_1_SAFE),
+                PermissionScope("drive.manage", "Manage files", "Rename, move, or trash items", false, ExecutionLevel.LEVEL_3_HIGH_RISK)
             ),
-            oauthClientId = "617494223617-niaz-drive.apps.googleusercontent.com",
+            oauthClientId = "Configured Server-Side (GOOGLE_CLIENT_ID)",
             authNotes = "Official Google Drive v3 REST API. Least-privilege drive.file scope."
         ),
         ConnectedApp(
@@ -200,6 +200,21 @@ class ConnectedAppsManager {
     fun toggleAutoSend(appId: String, enabled: Boolean) {
         _apps.value = _apps.value.map { app ->
             if (app.id == appId) app.copy(isAutoSendAllowed = enabled) else app
+        }
+    }
+
+    fun updateGoogleServices(status: ConnectionStatus, email: String?) {
+        val googleAppIds = setOf("gmail", "calendar", "drive")
+        _apps.value = _apps.value.map { app ->
+            if (app.id in googleAppIds) {
+                app.copy(
+                    status = status,
+                    accountName = email,
+                    connectedDate = if (status == ConnectionStatus.CONNECTED) (app.connectedDate ?: "Active") else null,
+                    lastUsedDate = if (status == ConnectionStatus.CONNECTED) "Just now" else null,
+                    permissions = app.permissions.map { it.copy(isGranted = (status == ConnectionStatus.CONNECTED)) }
+                )
+            } else app
         }
     }
 
